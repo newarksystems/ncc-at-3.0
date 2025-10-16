@@ -1,0 +1,553 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { Phone, PhoneCall, PhoneOff, User, Mic, Volume2, Grid, Pause, X, ChevronDown } from "lucide-react"
+import { MdKeyboardBackspace } from "react-icons/md"
+import { CiEraser } from "react-icons/ci"
+import { ImPhoneHangUp } from "react-icons/im"
+import { BiSolidPhoneCall } from "react-icons/bi"
+import { FaUserCircle } from "react-icons/fa"
+
+type CallState = "idle" | "dialing" | "incoming" | "in-call" | "keypad" | "ended"
+
+const contacts = [
+  { id: 1, name: "Andrew K.", number: "+254700900900", role: "Head of Finance" },
+  { id: 2, name: "Sarah M.", number: "+254730600600", role: "Operations" },
+  { id: 3, name: "David P.", number: "+254724300350", role: "Sales Lead" },
+  { id: 4, name: "Emma W.", number: "+254711222333", role: "Marketing" },
+  { id: 5, name: "James N.", number: "+254722333444", role: "Engineering" },
+  { id: 6, name: "Lucy T.", number: "+254733444555", role: "HR" },
+  { id: 7, name: "Michael B.", number: "+254744555666", role: "Product" },
+  { id: 8, name: "Grace O.", number: "+254755666777", role: "Support" },
+  { id: 9, name: "John R.", number: "+254766777888", role: "Design" },
+  { id: 10, name: "Alice M.", number: "+254777888999", role: "Analytics" },
+]
+
+export default function CallModal() {
+  const [open, setOpen] = useState(false)
+  const [selectedContact, setSelectedContact] = useState<any | null>(null)
+  const [dialNumber, setDialNumber] = useState("")
+  const [callState, setCallState] = useState<CallState>("idle")
+  const [timer, setTimer] = useState(0)
+  const [pressedKey, setPressedKey] = useState<string | null>(null)
+  const [showContacts, setShowContacts] = useState(false)
+  const [isMobile, setIsMobile] = useState(false)
+  const [showContactDialog, setShowContactDialog] = useState(false)
+  const [dialogContact, setDialogContact] = useState<any | null>(null)
+
+  // Detect mobile vs desktop
+  useEffect(() => {
+    const checkScreen = () => setIsMobile(window.innerWidth < 640)
+    checkScreen()
+    window.addEventListener("resize", checkScreen)
+    return () => window.removeEventListener("resize", checkScreen)
+  }, [])
+
+  // Timer effect for in-call state
+  useEffect(() => {
+    let interval: any
+    if (callState === "in-call") {
+      interval = setInterval(() => setTimer((t) => t + 1), 1000)
+    } else {
+      clearInterval(interval)
+    }
+    return () => clearInterval(interval)
+  }, [callState])
+
+  // Keyboard handling
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!open || showContactDialog || showContacts || callState !== "idle") return
+      const validKeys = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "#", "+"]
+      if (validKeys.includes(e.key)) {
+        handleDial(e.key)
+      } else if (e.key === "Backspace") {
+        e.preventDefault()
+        handleBackspace()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [open, showContactDialog, showContacts, callState])
+
+  // Ensure modal opens fresh
+  const handleOpen = () => {
+    setDialNumber("")
+    setSelectedContact(null)
+    setCallState("idle")
+    setTimer(0)
+    setShowContacts(false)
+    setShowContactDialog(false)
+    setOpen(true)
+  }
+
+  const handleDial = (num: string) => {
+    setDialNumber((prev) => {
+      const newNumber = prev + num
+      const cleanNumber = newNumber.replace(/\s/g, "")
+
+      let maxLength = 13
+      if (cleanNumber.startsWith("+254")) {
+        maxLength = 13
+      } else if (cleanNumber.startsWith("254")) {
+        maxLength = 12
+      } else if (cleanNumber.startsWith("01") || cleanNumber.startsWith("07")) {
+        maxLength = 10
+      } else if (cleanNumber.startsWith("1") || cleanNumber.startsWith("7")) {
+        maxLength = 9
+      }
+
+      if (cleanNumber.length > maxLength) {
+        return prev
+      }
+
+      if (cleanNumber.startsWith("+254") && cleanNumber.length >= 4) {
+        return cleanNumber.replace(/(\+254)(\d{3})(\d{3})(\d{3})/, "$1 $2 $3 $4").trim()
+      } else if (cleanNumber.startsWith("254") && cleanNumber.length >= 3) {
+        return cleanNumber.replace(/(254)(\d{3})(\d{3})(\d{3})/, "$1 $2 $3 $4").trim()
+      } else if ((cleanNumber.startsWith("01") || cleanNumber.startsWith("07")) && cleanNumber.length >= 4) {
+        return cleanNumber.replace(/(0[17])(\d{2})(\d{3})(\d{3})/, "$1$2 $3 $4").trim()
+      } else if ((cleanNumber.startsWith("1") || cleanNumber.startsWith("7")) && cleanNumber.length >= 2) {
+        return cleanNumber.replace(/([17])(\d{4})(\d{4})/, "$1 $2 $3").trim()
+      }
+      return newNumber
+    })
+
+    setPressedKey(num)
+    window.setTimeout(() => setPressedKey(null), 140)
+  }
+
+  const handleBackspace = () => {
+    setDialNumber((prev) => prev.replace(/\s/g, "").slice(0, -1))
+    setPressedKey("Backspace")
+    window.setTimeout(() => setPressedKey(null), 140)
+  }
+
+  const handleClearAll = () => {
+    setDialNumber("")
+  }
+
+  const formatTime = (sec: number) => {
+    const m = String(Math.floor(sec / 60)).padStart(2, "0")
+    const s = String(sec % 60).padStart(2, "0")
+    return `${m}:${s}`
+  }
+
+  const startCall = () => {
+    if (!dialNumber) return
+
+    let callNumber = dialNumber.replace(/\s/g, "")
+    if (callNumber.startsWith("01") || callNumber.startsWith("07")) {
+      callNumber = "+254" + callNumber.slice(2)
+    } else if (callNumber.startsWith("1") || callNumber.startsWith("7")) {
+      callNumber = "+254" + callNumber.slice(1)
+    }
+    console.log("Calling:", callNumber)
+
+    setCallState("dialing")
+    setTimeout(() => {
+      setCallState("in-call")
+      setTimer(0)
+    }, 3000)
+  }
+
+  const endCall = () => {
+    setCallState("ended")
+    setTimer((t) => t)
+    setTimeout(() => {
+      setCallState("idle")
+      setDialNumber("")
+      setSelectedContact(null)
+      setTimer(0)
+      setShowContacts(false)
+      setShowContactDialog(false)
+    }, 1400)
+  }
+
+  const handleContactClick = (contact: any) => {
+    if (isMobile) {
+      setDialogContact(contact)
+      setShowContactDialog(true)
+    } else {
+      setSelectedContact(contact)
+      setDialNumber(contact.number)
+    }
+  }
+
+  const handleCallContact = () => {
+    if (dialogContact) {
+      setSelectedContact(dialogContact)
+      setDialNumber(dialogContact.number)
+      setShowContactDialog(false)
+      setShowContacts(false)
+      startCall()
+    }
+  }
+
+  const handleIncomingCall = () => {
+    // Simulate incoming call by randomly selecting a contact or number
+    const randomIndex = Math.floor(Math.random() * (contacts.length + 1))
+    if (randomIndex < contacts.length) {
+      setSelectedContact(contacts[randomIndex])
+      setDialNumber(contacts[randomIndex].number)
+    } else {
+      setSelectedContact(null)
+      setDialNumber("+254712345678") // Fallback number
+    }
+    setCallState("incoming")
+    setShowContacts(false)
+    setShowContactDialog(false)
+    setOpen(true)
+  }
+
+  const acceptCall = () => {
+    setCallState("in-call")
+    setTimer(0)
+  }
+
+  const rejectCall = () => {
+    endCall()
+  }
+
+  return (
+    <>
+      <style jsx>{`
+        .contacts-enter {
+          transform: translateY(-20%);
+          opacity: 0;
+        }
+        .contacts-enter-active {
+          transform: translateY(0);
+          opacity: 1;
+          transition: transform 400ms ease-out, opacity 400ms ease-out;
+        }
+        .contacts-exit {
+          transform: translateY(0);
+          opacity: 1;
+        }
+        .contacts-exit-active {
+          transform: translateY(-20%);
+          opacity: 0;
+          transition: transform 400ms ease-in, opacity 400ms ease-in;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+        }
+      `}</style>
+
+      {/* Floating Call Button */}
+      <button
+        onClick={handleOpen}
+        className="fixed bottom-6 right-6 bg-green-500 text-white p-4 rounded-full shadow-lg hover:bg-green-600 transition"
+        aria-label="Open Dialer"
+      >
+        <Phone className="w-6 h-6" />
+      </button>
+
+      {/* Test Incoming Call Button (for development) */}
+      <button
+        onClick={handleIncomingCall}
+        className="fixed bottom-6 right-20 bg-blue-500 text-white p-4 rounded-full shadow-lg hover:bg-blue-600 transition"
+        aria-label="Simulate Incoming Call"
+      >
+        <PhoneCall className="w-6 h-6" />
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm z-50">
+          <div className="bg-gray-900 text-white rounded-2xl shadow-2xl w-[850px] h-[520px] flex overflow-hidden relative">
+            {/* Close Button */}
+            {callState === "idle" && (
+              <button
+                onClick={() => setOpen(false)}
+                className="absolute top-3 right-3 text-gray-400 hover:text-white"
+                aria-label="Close Dialer"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            )}
+
+            {/* Contacts Panel (Desktop) */}
+            {callState === "idle" && !isMobile && (
+              <div className="w-1/3 bg-gray-800 border-r border-gray-700 p-4 overflow-y-auto no-scrollbar">
+                <h2 className="text-lg font-semibold mb-3">Contacts</h2>
+                <ul className="space-y-3">
+                  {contacts.map((c) => (
+                    <li
+                      key={c.id}
+                      onClick={() => handleContactClick(c)}
+                      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-gray-700 transition ${
+                        selectedContact?.id === c.id ? "bg-gray-700" : ""
+                      }`}
+                      role="button"
+                      aria-label={`Select ${c.name}`}
+                    >
+                      <div className="bg-blue-600 w-10 h-10 flex items-center justify-center rounded-full">
+                        <User className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{c.name}</p>
+                        <p className="text-xs text-gray-400">{c.role}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Contacts Overlay (Mobile) */}
+            {callState === "idle" && isMobile && showContacts && (
+              <div className="absolute inset-0 bg-gray-800 p-4 overflow-y-auto no-scrollbar z-20">
+                <button
+                  onClick={() => setShowContacts(false)}
+                  className="absolute top-3 right-3 text-gray-400 hover:text-white"
+                  aria-label="Close Contacts"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <h2 className="text-lg font-semibold mb-3">Contacts</h2>
+                <ul className="space-y-3">
+                  {contacts.map((c) => (
+                    <li
+                      key={c.id}
+                      onClick={() => handleContactClick(c)}
+                      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-gray-700 transition ${
+                        selectedContact?.id === c.id ? "bg-gray-700" : ""
+                      }`}
+                      role="button"
+                      aria-label={`Select ${c.name}`}
+                    >
+                      <div className="bg-blue-600 w-10 h-10 flex items-center justify-center rounded-full">
+                        <User className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="font-medium">{c.name}</p>
+                        <p className="text-xs text-gray-400">{c.role}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Toggle Contacts Button (Mobile) */}
+            {callState === "idle" && isMobile && !showContacts && (
+              <button
+                onClick={() => setShowContacts(true)}
+                className="absolute top-3 left-3 text-gray-400 hover:text-white z-10"
+                aria-label="Show Contacts"
+              >
+                <ChevronDown className="w-5 h-5" />
+              </button>
+            )}
+
+            <div className={`${callState === "idle" && !isMobile ? "w-2/3" : "w-full"} flex flex-col p-6 items-center justify-center`}>
+              {callState === "idle" && (
+                <div className="flex flex-col items-center space-y-6 w-full">
+                  <div className="flex items-center gap-3">
+                    <div className="text-2xl font-semibold">{dialNumber || "Enter Number"}</div>
+                    {dialNumber && (
+                      <>
+                        <button
+                          onClick={handleBackspace}
+                          title="Backspace"
+                          aria-label="Backspace"
+                          className="ml-3 text-gray-400 hover:text-white"
+                        >
+                          <MdKeyboardBackspace className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={handleClearAll}
+                          title="Clear All"
+                          aria-label="Clear All"
+                          className="text-gray-400 hover:text-red-400"
+                        >
+                          <CiEraser className="w-6 h-6" />
+                        </button>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 text-xl">
+                    {["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => handleDial(d)}
+                        className={`w-16 h-16 flex items-center justify-center rounded-full transition transform ${
+                          pressedKey === d
+                            ? "bg-white/10 scale-95 text-white shadow-inner"
+                            : "bg-gray-700 hover:bg-gray-600"
+                        }`}
+                        aria-label={`Dial ${d}`}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    className="bg-green-500 hover:bg-green-600 w-16 h-16 rounded-full flex items-center justify-center shadow-lg"
+                    onClick={startCall}
+                    aria-label="Start call"
+                  >
+                    <PhoneCall className="w-7 h-7" />
+                  </button>
+                </div>
+              )}
+
+              {callState === "incoming" && (
+                <div className="flex flex-col items-center space-y-6">
+                  <div className="flex flex-col items-center relative -top-20">
+                    <p className="text-lg">{selectedContact?.name || dialNumber}</p>
+                    <p className="text-gray-400">Incoming Call...</p>
+                    <FaUserCircle className="w-16 h-16 text-gray-400 m-2" />
+                  </div>
+                  <div className="flex gap-16 relative -bottom-12">
+                    <div className="flex flex-col items-center space-y-1.5">
+                      <button
+                        className="bg-red-500 hover:bg-red-600 w-14 h-14 rounded-full flex items-center justify-center shadow-lg"
+                        onClick={rejectCall}
+                        aria-label="Reject call"
+                      >
+                        <ImPhoneHangUp className="w-7 h-7" />
+                      </button>
+                      <p className="flex items-center text-xs">Decline</p> 
+                    </div> 
+
+                    <div className="flex flex-col items-center space-y-1.5">
+                      <button
+                        className="bg-green-500 hover:bg-green-600 w-14 h-14 rounded-full flex items-center justify-center shadow-lg"
+                        onClick={acceptCall}
+                        aria-label="Accept call"
+                      >
+                        <BiSolidPhoneCall className="w-7 h-7" />
+                      </button>
+                      <p className="flex items-center text-xs">Accept</p>
+                    </div>
+
+                  </div>
+                </div>
+              )}
+
+              {/* Dialing */}
+              {callState === "dialing" && (
+                <div className="flex flex-col items-center space-y-6">
+                  <User className="w-16 h-16 text-gray-400" />
+                  <p className="text-lg">{selectedContact?.name || dialNumber}</p>
+                  <p className="text-gray-400">Calling...</p>
+                  <button
+                    className="bg-red-500 w-16 h-16 rounded-full flex items-center justify-center"
+                    onClick={endCall}
+                    aria-label="Cancel call"
+                  >
+                    <PhoneOff className="w-7 h-7" />
+                  </button>
+                </div>
+              )}
+
+              {callState === "in-call" && (
+                <div className="flex flex-col items-center space-y-6">
+                  <User className="w-16 h-16 text-gray-400" />
+                  <p className="text-lg">{selectedContact?.name || dialNumber}</p>
+                  <p className="text-gray-400">{formatTime(timer)}</p>
+                  <div className="grid grid-cols-3 gap-6 mt-4">
+                    <ControlButton icon={<Mic />} label="Mute" />
+                    <ControlButton icon={<Grid />} label="Keypad" onClick={() => setCallState("keypad")} />
+                    <ControlButton icon={<Volume2 />} label="Speaker" />
+                    <ControlButton icon={<Pause />} label="Hold" />
+                  </div>
+                  <button
+                    className="bg-red-500 w-16 h-16 rounded-full flex items-center justify-center mt-6"
+                    onClick={endCall}
+                    aria-label="End call"
+                  >
+                    <PhoneOff className="w-7 h-7" />
+                  </button>
+                </div>
+              )}
+
+              {callState === "keypad" && (
+                <div className="flex flex-col items-center space-y-6">
+                  <p className="text-lg">{selectedContact?.name || dialNumber}</p>
+                  <p className="text-gray-400">{formatTime(timer)}</p>
+                  <div className="grid grid-cols-3 gap-4 text-xl">
+                    {["1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"].map((d) => (
+                      <button
+                        key={d}
+                        onClick={() => handleDial(d)}
+                        className={`w-16 h-16 flex items-center justify-center rounded-full transition transform ${
+                          pressedKey === d
+                            ? "bg-white/10 scale-95 text-white shadow-inner"
+                            : "bg-gray-700 hover:bg-gray-600"
+                        }`}
+                        aria-label={`DTMF ${d}`}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    className="bg-red-500 w-16 h-16 rounded-full flex items-center justify-center mt-6"
+                    onClick={endCall}
+                    aria-label="End call"
+                  >
+                    <PhoneOff className="w-7 h-7" />
+                  </button>
+                </div>
+              )}
+
+              {callState === "ended" && (
+                <div className="flex flex-col items-center space-y-4">
+                  <User className="w-16 h-16 text-gray-400" />
+                  <p className="text-lg">{selectedContact?.name || dialNumber}</p>
+                  <p className="text-red-400">Call Ended</p>
+                </div>
+              )}
+
+              {showContactDialog && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-50">
+                  <div className="bg-gray-800 rounded-lg p-4 w-full max-w-[90%]">
+                    <h3 className="text-lg font-semibold mb-2">{dialogContact?.name}</h3>
+                    <p className="text-sm text-gray-400 mb-4">{dialogContact?.number}</p>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => setShowContactDialog(false)}
+                        className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600 transition"
+                        aria-label="Cancel"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleCallContact}
+                        className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition"
+                        aria-label={`Call ${dialogContact?.name}`}
+                      >
+                        Call
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function ControlButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} className="flex flex-col items-center text-gray-300 hover:text-white transition">
+      <div className="w-12 h-12 rounded-full bg-gray-700 flex items-center justify-center mb-1">
+        {icon}
+      </div>
+      <span className="text-xs">{label}</span>
+    </button>
+  )
+}

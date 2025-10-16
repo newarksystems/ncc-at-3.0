@@ -1,0 +1,55 @@
+                               Table "public.agents"
+         Column         |           Type           | Collation | Nullable | Default 
+------------------------+--------------------------+-----------+----------+---------
+ id                     | uuid                     |           | not null | 
+ extension              | character varying(20)    |           | not null | 
+ phone_number           | character varying(20)    |           |          | 
+ agent_id_3cx           | character varying(100)   |           |          | 
+ sip_username           | character varying(50)    |           |          | 
+ status                 | agentstatus              |           |          | 
+ last_status_change     | timestamp with time zone |           |          | now()
+ is_logged_in           | boolean                  |           |          | 
+ login_time             | timestamp with time zone |           |          | 
+ last_activity          | timestamp with time zone |           |          | 
+ current_call_id        | uuid                     |           |          | 
+ total_calls_today      | integer                  |           |          | 
+ answered_calls_today   | integer                  |           |          | 
+ missed_calls_today     | integer                  |           |          | 
+ total_talk_time_today  | integer                  |           |          | 
+ total_hold_time_today  | integer                  |           |          | 
+ total_calls            | integer                  |           |          | 
+ answered_calls         | integer                  |           |          | 
+ missed_calls           | integer                  |           |          | 
+ total_talk_time        | integer                  |           |          | 
+ average_call_duration  | double precision         |           |          | 
+ assigned_queues        | jsonb                    |           |          | 
+ skills                 | jsonb                    |           |          | 
+ languages              | jsonb                    |           |          | 
+ max_concurrent_calls   | integer                  |           |          | 
+ auto_answer            | boolean                  |           |          | 
+ call_recording_enabled | boolean                  |           |          | 
+ department             | character varying(100)   |           |          | 
+ supervisor_id          | uuid                     |           |          | 
+ notes                  | character varying(500)   |           |          | 
+ created_at             | timestamp with time zone |           |          | now()
+ updated_at             | timestamp with time zone |           |          | now()
+ last_login             | timestamp with time zone |           |          | 
+ user_id                | uuid                     |           |          | 
+ agent_type             | agenttype                |           |          | 
+ group                  | recoveryagentgroup       |           |          | 
+ region                 | region                   |           |          | 
+Indexes:
+    "agents_pkey" PRIMARY KEY, btree (id)
+    "agents_user_id_key" UNIQUE CONSTRAINT, btree (user_id)
+    "ix_agents_agent_id_3cx" UNIQUE, btree (agent_id_3cx)
+    "ix_agents_extension" UNIQUE, btree (extension)
+    "ix_agents_is_logged_in" btree (is_logged_in)
+    "ix_agents_status" btree (status)
+Foreign-key constraints:
+    "agents_supervisor_id_fkey" FOREIGN KEY (supervisor_id) REFERENCES users(id)
+    "agents_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id)
+    "fk_agents_current_call" FOREIGN KEY (current_call_id) REFERENCES calls(id)
+Referenced by:
+    TABLE "calls" CONSTRAINT "calls_agent_id_fkey" FOREIGN KEY (agent_id) REFERENCES agents(id)
+    TABLE "leads" CONSTRAINT "leads_assigned_agent_id_fkey" FOREIGN KEY (assigned_agent_id) REFERENCES agents(id)
+
