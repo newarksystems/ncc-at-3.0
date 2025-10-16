@@ -85,84 +85,20 @@ export default function CallModal() {
     try {
       setCallState("dialing")
       
-      console.log("Making call to:", dialNumber)
+      console.log("Making WebRTC call to:", dialNumber)
       
-      const result = await atService.makeCall({
+      // Use the fixed WebRTC call method
+      const result = await atService.makeWebRTCCall({
         to: dialNumber,
         from_: undefined
       })
       
-      // Store session ID for tracking
-      const sessionId = result.call_id || result.at_response?.entries?.[0]?.sessionId
-      console.log("Call initiated with session ID:", sessionId)
-      
+      console.log("WebRTC call result:", result)
       setCallState("calling")
       
-      // Connect to WebSocket for real-time updates
-      if (sessionId) {
-        const wsUrl = `ws://localhost:8000/api/calls/stream/${sessionId}`
-        console.log("Connecting to WebSocket:", wsUrl)
-        const ws = new WebSocket(wsUrl)
-        
-        ws.onopen = () => {
-          console.log("WebSocket connected")
-        }
-        
-        ws.onmessage = (event) => {
-          const data = JSON.parse(event.data)
-          console.log("Call update:", data)
-          
-          if (data.type === 'call_update' || data.type === 'call_status') {
-            switch (data.status) {
-              case 'queued':
-                setCallState("calling")
-                break
-              case 'ringing':
-                setCallState("calling")
-                break
-              case 'in-progress':
-                setCallState("in-call")
-                break
-              case 'completed':
-              case 'failed':
-              case 'ended':
-                setCallState("ended")
-                setTimeout(() => {
-                  setCallState("idle")
-                  setDialNumber("")
-                  setSelectedContact(null)
-                  ws.close()
-                }, 3000)
-                break
-            }
-          }
-        }
-        
-        ws.onerror = (error) => {
-          console.error("WebSocket error:", error)
-          setCallState("ended")
-          setTimeout(() => {
-            setCallState("idle")
-            setDialNumber("")
-            setSelectedContact(null)
-          }, 2000)
-        }
-        
-        ws.onclose = () => {
-          console.log("WebSocket closed")
-        }
-        
-        // Store WebSocket reference for cleanup
-        return () => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.close()
-          }
-        }
-      }
-      
     } catch (err: any) {
-      console.error("Error starting call:", err)
-      alert(`Failed to start call: ${err.message}`)
+      console.error("Error starting WebRTC call:", err)
+      alert(`Failed to start WebRTC call: ${err.message}`)
       setCallState("idle")
     }
   }

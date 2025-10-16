@@ -5,6 +5,9 @@ import requests
 import africastalking
 from typing import Dict, Any, List
 
+# Global call mapping storage
+call_mappings = {}
+
 class AfricasTalkingService:
     def __init__(self):
         username = os.getenv("AT_USERNAME")
@@ -120,7 +123,7 @@ class AfricasTalkingService:
             }
     
     def make_webrtc_call(self, to: str, client_name: str, from_: str = None) -> Dict[str, Any]:
-        """Make a WebRTC call using capability token approach"""
+        """Make a WebRTC call using capability token approach - NO Voice API calls"""
         try:
             # Get capability token first
             token_result = self.get_capability_token(client_name, from_)
@@ -134,9 +137,9 @@ class AfricasTalkingService:
             formatted_to = self.format_phone_number(to)
             
             print(f"DEBUG: WebRTC call setup - Token obtained for {client_name}")
-            print(f"DEBUG: Calling from {token_data['phoneNumber']} to {formatted_to}")
+            print(f"DEBUG: Frontend will call from {token_data['phoneNumber']} to {formatted_to}")
             
-            # Return token data for frontend WebRTC client to use
+            # Return ONLY token data - NO Voice API call made
             return {
                 "success": True,
                 "data": {
@@ -191,17 +194,11 @@ class AfricasTalkingService:
         return phone
 
     def make_call(self, to: str, from_: str = None, record: bool = True, callback_url: str = None, client_name: str = "default_client") -> Dict[str, Any]:
-        """Make a voice call - now using WebRTC approach for better reliability"""
+        """Make a voice call - using silica's direct approach"""
         try:
-            print(f"DEBUG: Making call to {to} using WebRTC approach")
+            print(f"DEBUG: Making direct Voice API call to {to}")
             
-            # Try WebRTC approach first (more reliable)
-            webrtc_result = self.make_webrtc_call(to, client_name, from_)
-            if webrtc_result.get("success"):
-                return webrtc_result
-            
-            # Fallback to direct Voice API if WebRTC fails
-            print(f"DEBUG: WebRTC failed, falling back to direct Voice API")
+            # Use direct Voice API like silica does
             return self._make_direct_call(to, from_, record, callback_url)
             
         except Exception as e:
@@ -213,105 +210,57 @@ class AfricasTalkingService:
             }
     
     def _make_direct_call(self, to: str, from_: str = None, record: bool = True, callback_url: str = None) -> Dict[str, Any]:
-        """Direct Voice API call (fallback method)"""
+        """Webhook-based Voice API call - make call to trigger webhook that routes to target (like Laravel project)"""
         try:
-            print(f"DEBUG: Original 'to' number: '{to}'")
+            print(f"DEBUG: Making webhook-based call to trigger routing")
             
-            # Format phone numbers to international format
-            formatted_to = self.format_phone_number(to)
-            print(f"DEBUG: Formatted 'to' number: '{formatted_to}'")
+            # Format the target phone number
+            target_number = self.format_phone_number(to)
+            print(f"DEBUG: Target number: {target_number}")
             
-            # Use provided number or auto-select one
-            if from_:
-                caller_number = self.format_phone_number(from_)
-            else:
-                caller_number = self.get_available_number()
-            formatted_from = self.format_phone_number(caller_number)
-            print(f"DEBUG: Formatted 'from' number: '{formatted_from}'")
+            # Use AT phone number as caller
+            caller_number = self.format_phone_number(from_) if from_ else self.get_available_number()
+            print(f"DEBUG: Caller number: {caller_number}")
             
-            # Use ngrok callback URL if available
-            if not callback_url:
-                callback_url = os.getenv("AT_Callback")
-            
-            print(f"DEBUG: Using callback URL: {callback_url}")
-            
-            # Validate phone numbers before making the call
-            if not formatted_to or formatted_to == "+":
-                return {
-                    "success": False,
-                    "error": "Invalid 'to' phone number",
-                    "message": "Invalid 'to' phone number provided"
-                }
-                
-            if not formatted_from or formatted_from == "+":
-                return {
-                    "success": False,
-                    "error": "Invalid 'from' phone number", 
-                    "message": "Invalid 'from' phone number provided"
-                }
-            
-            # Check if voice service is not initialized (credentials issue)
             if not self.voice:
-                print("DEBUG: Voice service not initialized (credential error), returning mock response")
                 return {
                     "success": True, 
                     "data": {
-                        "message": "Call request successful (mock mode due to credential error)",
-                        "callSessionId": f"mock_session_{int(time.time())}",
-                        "status": "success",
-                        "numSent": 1,
-                        "entries": [
-                            {
-                                "statusCode": 100,
-                                "statusDescription": "Success",
-                                "destination": formatted_to,
-                                "sessionId": f"mock_session_{int(time.time())}"
-                            }
-                        ]
+                        "entries": [{"sessionId": f"mock_{int(time.time())}", "status": "Queued"}]
                     },
-                    "from_number": formatted_from,
-                    "to_number": formatted_to
+                    "from_number": caller_number,
+                    "to_number": target_number
                 }
             
-            # Additional validation right before the API call
-            print(f"DEBUG: About to make call - callTo: '{formatted_to}', callFrom: '{formatted_from}'")
-            
-            if len(formatted_to) < 5:
-                return {
-                    "success": False,
-                    "error": f"Phone number too short: '{formatted_to}'",
-                    "message": f"Invalid phone number format for destination: '{formatted_to}'"
-                }
-            
-            if len(formatted_from) < 5:
-                return {
-                    "success": False,
-                    "error": f"Phone number too short: '{formatted_from}'",
-                    "message": f"Invalid phone number format for caller: '{formatted_from}'"
-                }
-            
-            # Africa's Talking Voice API call - callback URL not supported in basic call
-            print(f"DEBUG: Making AT API call with callFrom='{formatted_from}', callTo=['{formatted_to}']")
-            
+            # Make call TO the AT number itself, which will trigger webhook to route to target
+            # This creates a callback that gets handled by our webhook to route to the actual target
             response = self.voice.call(
-                callFrom=formatted_from,
-                callTo=[formatted_to]
+                callFrom=caller_number,
+                callTo=[caller_number]  # Call the same number to trigger webhook routing
             )
             
-            print(f"DEBUG: AT API Response: {response}")
+            # Store mapping with session ID for webhook routing
+            if response.get('entries') and len(response['entries']) > 0:
+                session_id = response['entries'][0].get('sessionId')
+                if session_id:
+                    call_mappings[session_id] = target_number
+                    print(f"DEBUG: Stored mapping {session_id} -> {target_number}")
+            
+            print(f"DEBUG: AT API Webhook Call Response: {response}")
             
             return {
                 "success": True, 
                 "data": response,
-                "from_number": formatted_from,
-                "to_number": formatted_to
+                "from_number": caller_number,
+                "to_number": target_number
             }
+            
         except Exception as e:
-            print(f"DEBUG: Direct call error: {str(e)}")
+            print(f"DEBUG: Webhook call error: {str(e)}")
             return {
-                "success": False, 
+                "success": False,
                 "error": str(e),
-                "message": f"Failed to initiate direct call: {str(e)}"
+                "message": f"Failed to make webhook call: {str(e)}"
             }
     
     def get_call_status(self, session_id: str) -> Dict[str, Any]:

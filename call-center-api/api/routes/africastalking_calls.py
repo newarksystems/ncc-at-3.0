@@ -40,6 +40,10 @@ async def get_capability_token(request: CapabilityTokenRequest, current_user=Dep
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
+class MakeWebRTCCallRequest(BaseModel):
+    to: str
+    from_: str = None
+
 @router.post("/make-call")
 async def make_call(request: MakeCallRequest, current_user=Depends(get_current_user)):
     """Make a call using Africa's Talking API"""
@@ -62,6 +66,26 @@ async def make_call(request: MakeCallRequest, current_user=Depends(get_current_u
         raise
     except Exception as e:
         # Handle unexpected errors
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.post("/make-webrtc-call")
+async def make_webrtc_call(request: MakeWebRTCCallRequest, current_user=Depends(get_current_user)):
+    """Make a WebRTC call using capability token"""
+    try:
+        result = africastalking_service.make_webrtc_call(
+            to=request.to,
+            client_name=current_user.username,
+            from_=request.from_
+        )
+        
+        if not result.get("success", True):
+            error_detail = result.get("error", result.get("message", "Unknown error"))
+            raise HTTPException(status_code=400, detail=error_detail)
+        
+        return result.get("data", result)
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @router.post("/call-status")

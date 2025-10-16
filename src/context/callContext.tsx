@@ -28,16 +28,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     try {
       setCallState(prev => ({ ...prev, callStatus: 'calling' }));
       
-      const result = await atService.makeCall({ to: number });
+      // For WebRTC calls, we need to initialize the WebRTC client and make the call
+      const result = await atService.makeWebRTCCall({ to: number });
       
       setCallState(prev => ({
         ...prev,
         currentCall: result,
-        callStatus: 'ringing',
+        callStatus: 'ringing', // This may change based on actual WebRTC events
         isConnected: true,
       }));
     } catch (error) {
-      console.error('Failed to make call:', error);
+      console.error('Failed to make WebRTC call:', error);
       setCallState(prev => ({ ...prev, callStatus: 'idle' }));
       throw error;
     }

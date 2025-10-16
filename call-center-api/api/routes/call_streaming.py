@@ -4,6 +4,7 @@ from sqlalchemy import select, desc
 from typing import List
 import json
 import logging
+import time
 from datetime import datetime
 
 from database import get_db
@@ -23,12 +24,17 @@ call_manager = ConnectionManager()
 class CallRequest(BaseModel):
     to: str
     from_: str = None
+    call_type: str = "webrtc"  # "webrtc" or "voice_api"
 
 class CallResponse(BaseModel):
     session_id: str
     status: str
     from_number: str
     to_number: str
+    call_type: str = "voice_api"
+    token: str = None          # WebRTC token
+    phone_number: str = None   # WebRTC phone number
+    client_name: str = None    # WebRTC client name
 
 @router.post("/initiate", response_model=CallResponse)
 async def initiate_call(
@@ -37,13 +43,154 @@ async def initiate_call(
     current_user=Depends(get_current_user)
 ):
     """Initiate a call and return session info for streaming"""
-    result = africastalking_service.make_call(to=request.to, from_=request.from_)
-    
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
-    
-    data = result["data"]
-    session_id = data["entries"][0]["sessionId"]
+    if request.call_type == "webrtc":
+        # Use WebRTC approach for browser-based calls
+        result = africastalking_service.make_webrtc_call(
+            to=request.to, 
+            client_name=current_user.username,
+            from_=request.from_
+        )
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        
+        # For WebRTC calls, we return token info instead of initiating backend call
+        # The actual call will be made by the WebRTC client in the browser
+        token_data = result.get("data", result)
+        session_id = f"webrtc_{int(time.time())}_{current_user.id}"
+        call_type = "webrtc"
+        
+        # Create call record but with pending status for WebRTC
+        call = Call(
+            at_session_id=session_id,
+            caller_number=token_data.get("phoneNumber", ""),
+            callee_number=request.to,
+            status="pending_webrtc",
+            direction="outbound"
+        )
+        db.add(call)
+        await db.commit()
+        
+        # Notify WebSocket clients
+        await call_manager.broadcast({
+            "type": "webrtc_call_initiated",
+            "session_id": session_id,
+            "from": token_data.get("phoneNumber", ""),
+            "to": request.to,
+            "status": "pending_webrtc",
+            "token_data": token_data  # Include token data for frontend WebRTC setup
+        }, "calls")
+        
+    else:  # voice_api
+        result = africastalking_service.make_call(to=request.to, from_=request.from_)
+        
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        
+        data = result["data"]
+        
+        # Handle Voice API response (silica approach)
+        if "entries" in data and len(data["entries"]) > 0:
+            session_id = data["entries"][0]["sessionId"]
+            call_type = "voice_api"
+        else:
+            # Fallback
+            session_id = f"call_{int(time.time())}_{current_user.id}"
+            call_type = "voice_api"
+        
+        # Check if user has agent record
+        agent_query = select(Agent).where(Agent.id == current_user.id)
+        agent_result = await db.execute(agent_query)
+        agent = agent_result.scalar_one_or_none()
+        
+        # Create call record
+        call = Call(
+            at_session_id=session_id,
+            caller_number=result["from_number"],
+            callee_number=result["to_number"],
+            status="queued",
+            direction="outbound",
+            agent_id=agent.id if agent else None
+        )
+        db.add(call)
+        await db.commit()
+        
+        # Notify WebSocket clients
+        await call_manager.broadcast({
+            "type": "call_initiated",
+            "session_id": session_id,
+            "from": result["from_number"],
+            "to": result["to_number"],
+            "status": "queued"
+        }, "calls")
+        
+        # Enable mock progression for testing until AT dashboard is configured
+        import os
+        enable_mock = os.getenv("ENABLE_MOCK_CALLS", "false").lower() == "true"
+        if enable_mock:
+            import asyncio
+            async def mock_call_progression():
+                client_id = f"call_stream_{session_id}"
+                
+                async for db_session in get_db():
+                    try:
+                        await asyncio.sleep(2)
+                        call.status = "ringing"
+                        await db_session.commit()
+                        await call_manager.send_to_client(client_id, {
+                            "type": "call_update",
+                            "session_id": session_id,
+                            "status": "ringing"
+                        })
+                        
+                        await asyncio.sleep(3)
+                        call.status = "in-progress"
+                        call.call_answered = datetime.now()
+                        await db_session.commit()
+                        await call_manager.send_to_client(client_id, {
+                            "type": "call_update", 
+                            "session_id": session_id,
+                            "status": "in-progress"
+                        })
+                        
+                        await asyncio.sleep(15)
+                        call.status = "completed"
+                        call.call_end = datetime.now()
+                        call.total_duration = 20
+                        await db_session.commit()
+                        await call_manager.send_to_client(client_id, {
+                            "type": "call_update",
+                            "session_id": session_id, 
+                            "status": "completed"
+                        })
+                        
+                    except Exception as e:
+                        logger.error(f"Mock progression error: {e}")
+                    finally:
+                        break
+            
+            asyncio.create_task(mock_call_progression())
+
+    if request.call_type == "webrtc":
+        # For WebRTC calls, return token data for frontend client
+        return CallResponse(
+            session_id=session_id,
+            status="pending_webrtc",
+            from_number=token_data.get("phoneNumber", ""),
+            to_number=request.to,
+            call_type="webrtc",
+            token=token_data.get("token"),
+            phone_number=token_data.get("phoneNumber"),
+            client_name=token_data.get("clientName")
+        )
+    else:
+        # For voice API calls, use the original response
+        return CallResponse(
+            session_id=session_id,
+            status="queued",
+            from_number=result["from_number"],
+            to_number=result["to_number"]
+        )
     
     # Check if user has agent record
     agent_query = select(Agent).where(Agent.id == current_user.id)
